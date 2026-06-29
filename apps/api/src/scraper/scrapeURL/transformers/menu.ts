@@ -62,19 +62,24 @@ export async function fetchMenu(
         captured &&
         typeof captured.source === "string" &&
         captured.items &&
-        typeof captured.items === "object"
+        typeof captured.items === "object" &&
+        !Array.isArray(captured.items)
       ) {
         modifierPayloads = {
           source: captured.source,
           items: captured.items as Record<string, unknown>,
         };
       } else {
-        meta.logger.info(
+        // Best-effort feature: an empty/malformed capture is a graceful degradation, not an
+        // anomaly. Log at debug so it does not spam at scale; the item just gets no optionGroups.
+        meta.logger.debug(
           "menu modifiers requested but capture payload was empty/malformed",
         );
       }
     } else {
-      meta.logger.info("menu modifiers requested but no capture payload found");
+      meta.logger.debug(
+        "menu modifiers requested but no capture payload found",
+      );
     }
   }
 

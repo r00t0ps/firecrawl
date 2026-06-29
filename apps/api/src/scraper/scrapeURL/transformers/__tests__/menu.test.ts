@@ -219,6 +219,31 @@ describe("fetchMenu", () => {
     expect("modifierPayloads" in body).toBe(false);
   });
 
+  it("rejects an array `items` payload (typeof [] === 'object')", async () => {
+    config.MENU_EXTRACTION_SERVICE_URL = "https://menu.internal";
+    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({ menu: null }),
+    }));
+    global.fetch = fetchSpy as any;
+    const document: any = {
+      rawHtml: "<html></html>",
+      metadata: { url: "https://www.doordash.com/store/x" },
+      // `items` as an array is malformed; it must not be forwarded to the service.
+      actions: {
+        javascriptReturns: [
+          { type: "menu-modifiers", value: { source: "doordash", items: [] } },
+        ],
+      },
+    };
+
+    await fetchMenu(baseMeta([{ type: "menu", modifiers: true }]), document);
+
+    const [, init] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(init!.body as string);
+    expect(body.modifierPayloads).toBeUndefined();
+  });
+
   it("does not forward modifier payloads when modifiers is not opted in", async () => {
     config.MENU_EXTRACTION_SERVICE_URL = "https://menu.internal";
     const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => ({

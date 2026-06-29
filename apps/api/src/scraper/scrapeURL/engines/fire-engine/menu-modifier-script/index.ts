@@ -204,8 +204,21 @@ export async function captureMenuModifiers(): Promise<CaptureResult> {
     // 4. Replay with bounded concurrency, reusing the session cookies/headers.
     const results: Record<string, unknown> = {};
     let idx = 0;
+    // Hard-bound the replay so no request keeps running after the action returns (which would
+    // waste the browser session and the stealth proxy). A deadline guard stops workers from
+    // starting new fetches, and an AbortController cancels any in-flight fetch when the budget
+    // expires. Promise.race only bounds the wait, not the work, so it is not enough on its own.
+    const controller = new AbortController();
+    const deadlineAt = Date.now() + OVERALL_BUDGET_MS;
+    const budgetTimer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        /* ignore */
+      }
+    }, OVERALL_BUDGET_MS);
     const worker = async (): Promise<void> => {
-      while (idx < targets.length) {
+      while (idx < targets.length && Date.now() < deadlineAt) {
         const t = targets[idx++];
         const req = buildReq(t);
         if (!req || !req.key) continue;
@@ -215,10 +228,11 @@ export async function captureMenuModifiers(): Promise<CaptureResult> {
             headers: cap.headers,
             body: req.body,
             credentials: "include",
+            signal: controller.signal,
           });
           if (r.ok) results[req.key] = await r.json();
         } catch {
-          /* ignore */
+          /* ignore (includes the AbortError thrown when the budget expires) */
         }
       }
     };
@@ -226,7 +240,8 @@ export async function captureMenuModifiers(): Promise<CaptureResult> {
     for (let i = 0; i < Math.min(CONCURRENCY, targets.length); i++) {
       pool.push(worker());
     }
-    await Promise.race([Promise.all(pool), sleep(OVERALL_BUDGET_MS)]);
+    await Promise.all(pool);
+    clearTimeout(budgetTimer);
     out.value.items = results;
   } catch (e) {
     out.value.error = String((e as Error)?.message ?? e);
